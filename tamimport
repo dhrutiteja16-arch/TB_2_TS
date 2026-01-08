@@ -1,0 +1,390 @@
+#%%
+from cli._ux import comment, console, output_message
+from ._tabimpclient import *
+import zipfile
+import tempfile
+
+def extract_twbx_to_twb(twbx_path):
+    """
+    Extract .twbx file (which is a ZIP archive) and return path to the main .twb file.
+    .twbx files are ZIP archives containing a .twb file and optional data files.
+    """
+    try:
+        temp_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(twbx_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+        
+        # Find the .twb file in the extracted contents
+        for root, dirs, files in os.walk(temp_dir):
+            for file in files:
+                if file.endswith('.twb'):
+                    return os.path.join(root, file), temp_dir
+        
+        output_message(f'No .twb file found in {twbx_path}', "error")
+        return None, temp_dir
+    except Exception as e:
+        output_message(f'Failed to extract .twbx file {twbx_path}: {str(e)}', "error")
+        return None, None
+
+def parse_tableau(filename, filetype='tds', directory='./input/tds/'):
+    """
+    Parse Tableau files (.tds, .twb, .twbx) and extract metadata.
+    
+    Parameters:
+    - filename: name of the file to parse
+    - filetype: type of file ('tds', 'twb', or 'twbx')
+    - directory: directory containing the file
+    """
+    filecount = 0
+    temp_dir = None
+    
+    # Handle .twbx files - extract them first
+    if filetype == 'twbx':
+        twbx_path = os.path.join(directory, filename)
+        extracted_twb, temp_dir = extract_twbx_to_twb(twbx_path)
+        if extracted_twb is None:
+            return
+        tabfile = extracted_twb
+        # Use .twb processing logic for extracted file
+        filetype = 'twb'
+    else:
+        tabfile = os.path.join(directory, filename)
+    
+    if filetype == 'tds': #".tds"=default
+        filecount += 1
+        fileid = 'tdsid'+str(filecount)
+        print(os.path.join(directory, filename))
+        with open(tabfile, 'r') as myfile:
+            obj = xmltodict.parse(myfile.read())
+        # For TDS files, use datasource root
+        root_key = 'datasource'
+    elif filetype == 'twb': #".twb"=default
+        filecount += 1
+        fileid = 'twbid'+str(filecount)
+        print(os.path.join(directory, filename))
+        with open(tabfile, 'r') as myfile:
+            obj = xmltodict.parse(myfile.read())
+        # For TWB files, use workbook root
+        root_key = 'workbook'
+    else:
+        output_message(f'Unsupported file type: {filetype}', "error")
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return
+
+# Parsing through different levels in the xml to find the required information such as connections
+    con = None
+    dsd = None
+    tblmap = None
+    mtd = None
+    tbl = None
+    destbl = None
+    rel = None
+    fml = None
+    
+    # Determine parsing paths based on file type
+    if root_key == 'datasource':
+        # TDS file parsing
+        try:
+            con = obj['datasource'][1]['connection']['named-connections']['named-connection']
+        except: pass
+        try:
+            con = obj['datasource']['connection']['named-connections']['named-connection']
+        except: pass 
+        try:
+            con = obj['datasources']['datasource']['connection']
+        except: pass
+        try:
+            dsd = obj['datasource'][1]['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']['relation']
+        except: pass
+        try:
+            dsd = obj['datasource']['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']
+        except: pass
+        try:
+            dsd = obj['datasource']['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']['relation']
+        except: pass
+        try:
+            tblmap = obj['datasource'][1]['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['objects']['object']
+        except: pass
+        try:
+            tblmap = obj['datasource']['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['objects']['object']
+        except: pass
+        try:
+            mtd = obj['datasource'][1]['connection']['metadata-records']['metadata-record']
+        except: pass
+        try:
+            mtd = obj['datasource']['connection']['metadata-records']['metadata-record']
+        except: pass
+        try:
+            tbl = obj['datasource'][1]['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try:
+            tbl = obj['datasource']['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try: 
+            destbl = obj['datasource'][1]['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try:
+            destbl = obj['datasource']['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try:
+            rel = obj['datasource'][1]['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['relationships']['relationship']
+        except: pass
+        try:
+            rel = obj['datasource']['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['relationships']['relationship']
+        except: pass
+        try: 
+            fml = obj['datasource'][1]['column']
+        except: pass
+        try:
+            fml = obj['datasource']['column']
+        except: pass
+    
+    elif root_key == 'workbook':
+        # TWB/TWBX file parsing
+        try:
+            con = obj['workbook']['datasources']['datasource'][1]['connection']['named-connections']['named-connection']
+        except: pass
+        try:
+            con = obj['workbook']['datasources']['datasource']['connection']['named-connections']['named-connection']
+        except: pass
+        try:
+            con = obj['workbook']['datasources']['datasource']['connection']
+        except: pass
+        try:
+            dsd = obj['workbook']['datasources']['datasource'][1]['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']
+        except: pass
+        try:
+            dsd = obj['workbook']['datasources']['datasource'][1]['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']['relation']
+        except: pass
+        try:
+            dsd = obj['workbook']['datasources']['datasource']['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']
+        except: pass
+        try:
+            dsd = obj['workbook']['datasources']['datasource']['connection']['_.fcp.ObjectModelEncapsulateLegacy.true...relation']['relation']
+        except: pass
+        try:
+            tblmap = obj['workbook']['datasources']['datasource'][1]['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['objects']['object']
+        except: pass
+        try:
+            tblmap = obj['workbook']['datasources']['datasource']['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['objects']['object']
+        except: pass
+        try:
+            mtd = obj['workbook']['datasources']['datasource'][1]['connection']['metadata-records']['metadata-record']
+        except: pass
+        try:
+            mtd = obj['workbook']['datasources']['datasource']['connection']['metadata-records']['metadata-record']
+        except: pass
+        try:
+            tbl = obj['workbook']['datasources']['datasource'][1]['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try:
+            tbl = obj['workbook']['datasources']['datasource']['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try: 
+            destbl = obj['workbook']['datasources']['datasource'][1]['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try:
+            destbl = obj['workbook']['datasources']['datasource']['_.fcp.ObjectModelTableType.true...column']
+        except: pass
+        try:
+            rel = obj['workbook']['datasources']['datasource'][1]['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['relationships']['relationship']
+        except: pass
+        try:
+            rel = obj['workbook']['datasources']['datasource']['_.fcp.ObjectModelEncapsulateLegacy.true...object-graph']['relationships']['relationship']
+        except: pass
+        try: 
+            fml = obj['workbook']['datasources']['datasource'][1]['column']
+        except: pass
+        try:
+            fml = obj['workbook']['datasources']['datasource']['column']
+        except: pass
+
+# Referencing the functions from the _tabimpclient.py file
+    connections = None
+    datasources = None
+    objectrelations = None
+    metadata = None
+    tables = None
+    destinationtables = None
+    relationships = None
+    formulas = None
+    
+    try:
+        if con is not None:
+            connections = connectiondetails(con)
+    except:
+        output_message('No connections for ' + filename, "error") 
+        connections = None
+        
+    try:
+        if dsd is not None:
+            datasources = datasourcedetails(dsd)
+    except:
+        output_message('No datasources for ' + filename, "error")
+        datasources = None
+                
+    try:
+        if tblmap is not None:
+            objectrelations = tablemappingdetails(tblmap)
+    except: 
+        output_message('No objectrelations for ' + filename, "error") 
+        objectrelations = None
+        
+    try:
+        if mtd is not None:
+            metadata = metadetails(mtd)
+    except: 
+        output_message('No metadata for ' + filename, "error") 
+        metadata = None
+        
+    try:
+        if tbl is not None:
+            tables = tabledetails(tbl)
+    except: 
+        output_message('No tables for ' + filename, "error") 
+        tables = None
+        
+    try:
+        if destbl is not None:
+            destinationtables = desttabledetails(destbl)
+    except: 
+        output_message('No destinationtables for ' + filename, "error") 
+        destinationtables = None
+        
+    try:
+        if rel is not None:
+            relationships = relationshipdetails(rel)
+    except: 
+        output_message('No relationships for ' + filename, "error") 
+        relationships = None
+        
+    try:
+        if fml is not None:
+            formulas = formuladetails(fml)
+    except: 
+        output_message('No formulas for ' + filename, "error") 
+        formulas = None
+        
+# Joining multiple dataframes together ready for the CSV output
+    connectionsources = None
+    connectionobjects = None
+    connectionobjectsmeta = None
+    tablesmetadata = None
+    connectionstablesmetadata = None
+    connectionobjsrels = None
+    connectionobjectsrelationships = None
+    
+    if connections is not None and datasources is not None:
+        try:    
+            connectionsources = connections.merge(datasources, on='connection', validate='1:m')
+        except: 
+            try:    
+                connectionsources = connections.merge(datasources, on='connection', validate='m:m')
+            except: 
+                connectionsources = None
+    
+    if connectionsources is not None and objectrelations is not None:
+        try:
+            connectionobjects = connectionsources.merge(objectrelations, on='name', how='right', validate='1:m')
+        except: 
+            try:
+                connectionobjects = connectionsources.merge(objectrelations, on='name', how='right', validate='m:m')
+            except: 
+                connectionobjects = None
+    
+    if connectionobjects is not None and metadata is not None:
+        try:
+            connectionobjectsmeta = connectionobjects.merge(metadata, on='tableobject', validate='1:m')
+        except: 
+            connectionobjectsmeta = None
+    
+    if metadata is not None and tables is not None:
+        try:
+            tablesmetadata = metadata.merge(tables, on='tableobject', validate='m:1')
+        except: 
+            tablesmetadata = None
+            
+    if tablesmetadata is not None and connectionobjects is not None:
+        try:
+            connectionstablesmetadata = tablesmetadata.merge(connectionobjects, on='tableobject', validate='m:1')
+        except: 
+            connectionstablesmetadata = None
+
+    if connectionstablesmetadata is not None:
+        try:
+            df = connectionstablesmetadata[["col_name","db_table"]]
+            df = df.copy()
+            df.loc[:, 'tablecolumn'] = df['db_table'] + '_1::' + df['col_name']
+            if formulas is not None:
+                for index, row in df.iterrows():
+                    formulas['expr'] = formulas['expr'].str.replace(row['col_name'], row['tablecolumn'])
+        except: pass
+    
+    if connectionobjects is not None and relationships is not None:
+        try:
+            connectionobjsrels = connectionobjects.merge(relationships, on='tableobject', validate='1:m')
+        except: pass
+        
+    if connectionobjsrels is not None and destinationtables is not None:
+        try:
+            connectionobjectsrelationships = connectionobjsrels.merge(destinationtables, on='destination', validate='m:1')
+        except: pass
+        
+    if connectionobjectsrelationships is not None:
+        try:
+            if filetype == 'twb':
+                connectionobjectsrelationships['on']='[' + connectionobjectsrelationships['name']+ '::' + connectionobjectsrelationships['lkey'] + '] ' + connectionobjectsrelationships['op'] + ' [' + connectionobjectsrelationships['destination']+ '::' + connectionobjectsrelationships['rkey'] + ']'
+            else:
+                connectionobjectsrelationships['on']='[' + connectionobjectsrelationships['name']+ '::' + connectionobjectsrelationships['lkey'] + '] ' + connectionobjectsrelationships['op'] + ' [' + connectionobjectsrelationships['destinationname']+ '::' + connectionobjectsrelationships['rkey'] + ']'   
+        except: pass
+    
+    if connectionstablesmetadata is not None:
+        connectionstablesmetadata['filename']=filename
+        connectionstablesmetadata['fileid']= fileid
+        connectionstablesmetadata.to_csv('./input/metadata_objects/metadata_{}.csv'.format(filename),index=False )
+    
+    if connectionobjectsrelationships is not None:
+        try:
+            connectionobjectsrelationships['filename']=filename
+            connectionobjectsrelationships['fileid']= fileid
+            connectionobjectsrelationships.to_csv('./input/relationships/relations_{}.csv'.format(filename),index=False )
+        except: output_message('There are no relationships for ' + filename, "error")
+
+    if connectionobjectsrelationships is not None:
+        try:
+            data = connectionobjectsrelationships
+            data['join_path'] = data['name'] + '_' + data['destinationname']
+            rel = data[['name','destinationname','join_path']]
+            par = data[['name','destinationname','join_path']]
+            df = rel.merge(par, how='right', left_on='destinationname', right_on='name')
+            df2 = df.merge(rel, how='right', left_on='destinationname_y', right_on='name')
+            df3 = df2[['destinationname','join_path_x','join_path_y','join_path']]
+            df_unpivoted = df3.melt(id_vars=['destinationname'], var_name='paths', value_name='path_values')
+            df_unpivoted.dropna(inplace=True)
+            join_paths = df_unpivoted[['destinationname','path_values']] 
+            join_paths.to_csv('./input/join_paths/path_{}.csv'.format(filename),index=False)
+        except: output_message('There are no join paths for ' + filename, "error")
+        
+    if formulas is not None:
+        try: 
+            formulas['filename']=filename
+            formulas['fileid']= fileid
+            formulas.to_csv('./input/formulas/formulas_{}.csv'.format(filename),index=False )
+        except: output_message('There are no formulas for ' + filename, "error")
+
+# Summary CSV output provided to list the various files that have been parsed 
+    if connectionstablesmetadata is not None:
+        df = connectionstablesmetadata[["db_table","db","schema","connection","fileid"]].drop_duplicates()
+        for index, row in df.iterrows():
+            db_table = row['db_table']
+            db = row['db']
+            schema = row['schema']
+            connection = row['connection']
+            details = pd.DataFrame(columns=["filename", "filecount","fileid","db_table","db","schema","connection"])
+            new_details = pd.DataFrame({"filename": [filename], "filecount": [filecount], "fileid": [fileid], "db_table": [db_table], "db": [db], "schema": [schema], "connection": [connection]})
+            details = pd.concat([details, new_details], ignore_index=True)
+    
+    # Clean up temp directory if we extracted a .twbx file
+    if temp_dir:
+        shutil.rmtree(temp_dir, ignore_errors=True)
